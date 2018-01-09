@@ -1,0 +1,403 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlenv.h>
+#include <sqlutil.h>
+
+EXEC SQL BEGIN DECLARE SECTION;
+  sqlint32 custId;
+  char custName[15];
+  char custGender[1];
+  sqlint32 custAge;
+  sqlint32 custPin;
+  sqlint32 totalBal;
+  sqlint32 accNum;
+  sqlint32 balance;
+  sqlint32 accBal;
+  sqlint32 accType;
+  sqlint32 accStat;
+  char dbAlias[15];
+EXEC SQL END DECLARE SECTION;
+
+EXEC SQL INCLUDE SQLCA;
+
+int main(int argc, char *argv[]) {
+  int rc = 0;
+  struct sqlca sqlca;
+  if (argc < 2) {
+    printf("Usage sample2 dbAlias");
+  } else {
+    strcpy(dbAlias, argv[1]);
+    EXEC SQL CONNECT TO :dbAlias;
+    rc = mainUserPage();
+    EXEC SQL CONNECT RESET;
+  }
+    return 0;
+}
+
+int opt;
+int mainUserPage(void) {
+  int done = 1;
+  while (done) {
+    printf("\nWelcome to our Banking System");
+    printf("\n1. New Customer");
+    printf("\n2. Customer Login");
+    printf("\n3. Exit\n");
+    scanf("%d", &opt);
+    switch (opt) {
+      case 1:
+        printf("Name: ");
+        scanf("%s", &custName);
+        int correct = 1;
+        while (correct) {
+          printf("Gender (M/F): ");
+          scanf("%s", &custGender);
+          if ((strncmp(custGender, "M", 10) == 0) || (strncmp(custGender, "F", 10) == 0)) {correct = 0;}
+          else {printf("Invalid input %s\n", custGender);}
+        }
+        correct = 1;
+        while (correct) {
+          printf("Age: ");
+          scanf("%d", &custAge);
+          if (custAge > 0) {correct = 0;}
+          else {printf("Invalid age\n");}
+        }
+        correct = 1;
+        while (correct) {
+          printf("Pin: ");
+          scanf("%d", &custPin);//Pin
+          if (custPin > 0) {correct = 0;}
+          else {printf("Invalid pin\n");}
+        }
+        custId = createCustomer();
+        printf("\nYour customer ID is %d\n", custId);
+        break;
+      case 2:
+        printf("ID: ");
+        scanf("%d", &custId);
+
+        printf("Pin: ");
+        scanf("%d", &custPin);
+        if (custId == 0 && custPin == 0) {
+          specialLogin();
+        }
+        else if (authenticated(custId, custPin)) {
+          customerScreen(custId, custPin);
+        }else {
+          printf("invalid ID or Pin number.\n");
+        }
+        break;
+      case 3:
+        //Exit the program
+        done = 0;
+        break;
+      default:
+        printf("Please choose a valid option (1, 2, or 3).\n");
+        break;
+    }
+  }
+  return 0;
+}
+
+int createCustomer () {
+  EXEC SQL SELECT ID INTO :custId 
+  FROM FINAL TABLE (INSERT INTO CUSTOMER (NAME, GENDER, AGE, PIN) 
+  VALUES (:custName, :custGender, :custAge, :custPin));
+  
+  return custId;
+}
+
+int specialLogin() {
+  int done = 1;
+  int id = -1;
+  int minAge = 0;
+  int maxAge = 0;
+  while (done) {
+    printf("You are in Administrator Menu");
+    printf("\n1. Account Summary for a Customer");
+    printf("\n2. Report A :: Customer Information with Total Balance in Decreasing Order");
+    printf("\n3. Report B :: Find the Average Total Balance Between Age Groups");
+    printf("\n4. Exit\n");
+    scanf("%d", &opt);
+    switch (opt) {
+      case 1:
+        printf("ID: ");
+        scanf("%d", &id);
+        accSummary(id);
+        break;
+      case 2:
+        custInfo();
+        break;
+      case 3: 
+        printf("Min age: ");
+        scanf("%d", &minAge);
+        printf("Max age: ");
+        scanf("%d", &maxAge);
+        avgTotalBal(minAge, maxAge);
+        break;
+      case 4:
+        done = 0;
+        break;
+      default:
+        printf("Please choose a valid option (1, 2, 3, or 4).\n");
+      }
+    }
+    return 0;
+}
+
+int custInfo() {
+  EXEC SQL DECLARE c4 CURSOR FOR
+  SELECT C.ID, NAME, AGE, GENDER, SUM(BALANCE) AS BALANCE
+  FROM CUSTOMER AS C, ACCOUNT AS A
+  WHERE C.ID = A.ID AND STATUS = 'A'
+  GROUP BY C.ID, NAME, AGE, GENDER
+  ORDER BY BALANCE DESC;
+  printf("ID\tNAME\t\tAGE\tGENDER\tTOTAL BALANCE\n");
+  EXEC SQL OPEN c4;
+  int running = 1;
+  while (running) {
+    EXEC SQL FETCH c4 INTO :custId, :custName, :custAge, :custGender, :balance;
+    if (SQLCODE != 0) {
+      running = 0;
+      break;
+    }
+    if (strlen(custName) >= 10)
+      printf("%d\t%s\t%d\t%s\t%d\n", custId, custName, custAge, custGender, balance);
+    else 
+      printf("%d\t%s\t\t%d\t%s\t%d\n", custId, custName, custAge, custGender, balance);
+  }
+  EXEC SQL CLOSE c4;
+  return 1;
+}
+int avgTotalBal(int minAge, int maxAge) {
+  EXEC SQL BEGIN DECLARE SECTION;
+  sqlint32 lower;
+  sqlint32 upper;
+  EXEC SQL END DECLARE SECTION;
+  lower = minAge;
+  upper = maxAge;
+  EXEC SQL DECLARE c5 CURSOR FOR
+  SELECT AVG(AGE) AS AGE, AVG(BALANCE) AS BALANCE
+  FROM CUSTOMER AS C, ACCOUNT AS A
+  WHERE C.AGE >= :lower AND C.AGE <= :upper
+  AND STATUS = 'A';
+  EXEC SQL OPEN c5;
+  printf("AVERAGE AGE\tAVERAGE BALANCE\n");
+  while (1) {
+    EXEC SQL FETCH c5 INTO :custAge, :balance;
+    if (SQLCODE != 0) break;
+    printf("%d\t\t%d\n\n", custAge, balance);
+  }
+  EXEC SQL CLOSE c5;
+  return 1;
+}
+
+int accSummary(int anId) {
+  custId = anId;
+  EXEC SQL SELECT sum(balance) INTO :totalBal
+    FROM ACCOUNT
+    WHERE id = :custId;
+
+  printf("TOTAL BALANCE\tACCOUNT\tBALANCE\n");
+
+  EXEC SQL DECLARE c3 CURSOR FOR
+  SELECT NUMBER, BALANCE
+  FROM ACCOUNT
+  WHERE ID = :custId AND STATUS = 'A';
+
+  EXEC SQL OPEN c3;
+  printf("%d",totalBal);
+  while (1) {
+        EXEC SQL FETCH c3 INTO :accNum, :balance;
+        if (SQLCODE != 0) break;
+        printf("\t\t%d\t%d\n\n", accNum, balance);
+  }
+  EXEC SQL CLOSE c3;
+  return 1;
+}
+
+int authenticated(int id, int pin) {
+  EXEC SQL BEGIN DECLARE SECTION;
+  sqlint32 thePin = -1;
+  EXEC SQL END DECLARE SECTION;
+
+  custId = id;
+  EXEC SQL SELECT PIN INTO :thePin
+  FROM CUSTOMER
+  WHERE ID = :custId;
+
+  return thePin == pin ? 1 : 0;
+}
+
+int customerScreen(int theId, int custPin) {
+    int done = 1;
+    int thisBalance = -1, account = -1, accNum2 = -1, id = -1, amount = -1;
+    char accType[2];
+    while (done) {
+      printf("Customer Main Menu"
+          "\n1. Open Account"
+          "\n2. Close Account"
+          "\n3. Deposit"
+          "\n4. Withdraw"
+          "\n5. Transfer"
+          "\n6. Account Summary"
+          "\n7. Exit\n");
+      scanf("%d", &opt);
+      switch (opt) {
+      case 1:
+        printf("Enter an ID: ");
+        scanf("%d", &id);
+        printf("What type of account (C)hecking, or (S)avings: ");
+        scanf("%s", &accType);
+        printf("Enter your initial balance: ");
+        scanf("%d", &thisBalance);
+        account = newAccount(id, accType, thisBalance);
+        printf("\nYour account number is: %d\n", account);
+        break;
+      case 2:
+        printf("Enter an account number: ");
+        scanf("%d", &account);
+        closeAccount(theId, account);
+        break;
+      case 3:
+        printf("Enter an account number: ");
+        scanf("%d", &account);
+        printf("Enter the amount to deposit: ");
+        scanf("%d", &amount);
+        deposit(account, amount);
+        break;
+      case 4:
+        printf("Enter your account number: ");
+        scanf("%d", &account);
+        printf("Enter the amount to withdraw: ");
+        scanf("%d", &amount);
+        if (!isOwner(theId, account)) {
+          printf("You cannot withdraw from %d.\n\n", account);
+        } else {
+          withdraw(theId, account, amount);
+        }
+        break;
+      case 5: 
+        printf("Enter source account number: ");
+        scanf("%d", &account);
+        printf("Enter destination account number: ");
+        scanf("%d", &accNum2);
+        printf("Enter transfer amount: ");
+        scanf("%d", &amount);
+        if (validAcc(accNum) && validAcc(accNum2)) {
+          transfer(theId, account, accNum2, amount);
+        } else {
+          printf("Invalid account number(s).\n");
+        }
+        break;
+      case 6:
+        accSummary(theId);
+        break;
+      case 7:
+        done = 0;
+        break;
+      default:
+        printf("Please choose a valid option (1, 2, 3, 4, 5, 6, or 7).\n");
+        break;
+      }
+    }
+    return 1;
+  }
+int newAccount(int id, char accType[2], int inBalance) {
+  EXEC SQL BEGIN DECLARE SECTION;
+  sqlint32 thisId;
+  char type[2];
+  sqlint32 initialBal;
+  sqlint32 thisAccNum;
+  EXEC SQL END DECLARE SECTION;
+
+  thisId = id;
+  strcpy(type, accType);
+  initialBal = inBalance;
+
+  EXEC SQL SELECT NUMBER INTO :thisAccNum
+  FROM FINAL TABLE (INSERT INTO ACCOUNT (ID, BALANCE, TYPE, STATUS)
+  VALUES (:thisId, :initialBal, :type, 'A'));
+
+  return thisAccNum;
+}
+
+int closeAccount(int id, int account) {
+  if (isOwner(id, account)) {
+    accNum = account;
+    EXEC SQL UPDATE ACCOUNT SET STATUS = 'I', BALANCE = 0
+    WHERE NUMBER = :accNum;
+    printf("Account %d has been closed.\n\n", accNum);
+  } else {
+    printf("You are not the owner of %d\n\n", accNum);
+  }
+  return 1;
+}
+
+int isOwner(int id, int account) {
+  accNum = account;
+  EXEC SQL SELECT ID INTO :custId 
+  FROM ACCOUNT WHERE NUMBER = :accNum;
+    
+  return id == custId ? 1 : 0;
+}
+
+int deposit(int account, int amt) {
+  EXEC SQL BEGIN DECLARE SECTION;
+  sqlint32 bal;
+  EXEC SQL END DECLARE SECTION;
+
+  accNum = account;
+  if (amt < 0) {
+    printf("Cannot deposit negative amounts.\n");
+  } else {
+    bal = amt;
+    EXEC SQL UPDATE ACCOUNT SET BALANCE = (
+    SELECT BALANCE FROM ACCOUNT WHERE NUMBER = :accNum) + :bal 
+    WHERE NUMBER = :accNum;
+  }
+  return 1;
+}
+
+int withdraw(int id, int account, int amt) {
+  EXEC SQL BEGIN DECLARE SECTION;
+  sqlint32 bal;
+  EXEC SQL END DECLARE SECTION;
+
+  accNum = account;
+
+  EXEC SQL SELECT BALANCE INTO :bal
+  FROM ACCOUNT
+  WHERE NUMBER = :accNum;
+
+  if (amt < 0) {
+    printf("Cannot deposit negative amounts.\n");
+  } else if ((bal - amt) < 0) {
+    printf("Not enough funds to withdraw %d\n", amt);
+  } else {
+    bal = amt;
+    EXEC SQL UPDATE ACCOUNT SET BALANCE = (
+    SELECT BALANCE FROM ACCOUNT WHERE NUMBER = :accNum) - :bal
+    WHERE NUMBER = :accNum;
+  }
+  return 1;
+}
+
+int validAcc(int account){
+  accNum = account;
+  EXEC SQL SELECT ID INTO :custId
+  FROM ACCOUNT 
+  WHERE NUMBER = :accNum AND STATUS = 'A';
+
+  return custId >= 100 ? 1 : 0;
+}
+
+int transfer(int id, int acc1, int acc2, int amt) {
+  if (isOwner(id, acc1)) {
+    withdraw(id, acc1, amt);
+    deposit(acc2, amt);
+  } else {
+    printf("You cannot transfer from an account that you do not own.\n");
+  }
+  return 1;
+}
